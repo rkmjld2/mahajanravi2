@@ -28,8 +28,14 @@ for section in required_sections:
     if section not in st.secrets:
         st.error(f"🚨 Missing required section: {section}")
         st.stop()
+#        
+if "GROQ_API_KEY" in st.secrets:
+    st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
+else:
+    st.error("🚨 Missing GROQ_API_KEY in Streamlit Cloud Secrets. Please add it in Settings → Secrets.")
+    st.stop()
 
-st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
+#st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
 
 # ── 2. SSL CERTIFICATE SETUP
 def setup_ssl_cert():
@@ -237,4 +243,5 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+
 
