@@ -12,8 +12,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+
+#from langchain.chains import create_retrieval_chain
+#from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.documents import Document
 from langchain_groq import ChatGroq
 
@@ -234,3 +237,4 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+
