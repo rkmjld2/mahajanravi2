@@ -69,31 +69,37 @@ else:
 
 #st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
 
-# ── 2. SSL CERTIFICATE SETUP
-def setup_ssl_cert():
-    cert_path = "tidb_ca.pem"
-    if not Path(cert_path).exists():
-        cert_content = st.secrets.get("TIDB_SSL_CA", "")
-        if cert_content:
-            Path(cert_path).write_text(cert_content)
-            st.success("✅ SSL cert created from secrets")
-    return cert_path
-
-# ── 3. DATABASE CONNECTION
+# ── 2. SSL CERTIFICATE CONTENT (No file needed)
+@st.cache_data
+def get_ssl_ca_content():
+    """Returns raw CA cert content from secrets - works on Streamlit Cloud"""
+    cert_content = st.secrets.get("TIDB_SSL_CA", "")
+    if not cert_content:
+        st.warning("⚠️ No TIDB_SSL_CA in secrets - using SSL without CA verification")
+        return None
+    return cert_content.strip()
+# ── 3. DATABASE CONNECTION (Fixed for Cloud)
 @st.cache_resource
 def get_db_connection():
     db_config = st.secrets["connections"]["databases"]["default"]
-    ssl_ca_path = setup_ssl_cert()
+    ssl_ca_content = get_ssl_ca_content()  # Get content directly
+    
+    ssl_args = {}
+    if ssl_ca_content:
+        ssl_args = {
+            "ssl_ca": ssl_ca_content,  # Pass STRING content directly
+            "ssl_verify_cert": True,
+            "ssl_verify_identity": True
+        }
+    
     conn = mysql.connector.connect(
         host=db_config["host"],
         port=int(db_config["port"]),
         user=db_config["username"],
         password=db_config["password"],
         database=db_config["database"],
-        ssl_ca=ssl_ca_path,
-        ssl_verify_cert=True,
-        ssl_verify_identity=True,
-        connect_timeout=30
+        connect_timeout=30,
+        **ssl_args  # Dynamic SSL params
     )
     return conn
 
@@ -275,6 +281,7 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+
 
 
 
