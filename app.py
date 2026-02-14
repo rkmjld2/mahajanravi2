@@ -92,7 +92,7 @@ def get_ssl_ca_content():
     else:
         st.error("❌ TIDB_SSL_CA invalid - missing certificate header")
         return None
-
+# -- 3  Database Connection
 @st.cache_resource
 def get_db_connection():
     db_config = st.secrets["connections"]["databases"]["default"]
@@ -309,6 +309,7 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+
 
 
 
