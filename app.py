@@ -311,48 +311,49 @@ with tab2:
     """)
 # code addted further here 
         # ── Download Q&A ────────────────────────────────────────────────
-        if st.session_state.messages:
-            st.markdown("---")
+# ── Download Q&A ────────────────────────────────────────────────
+if st.session_state.messages:
+    st.markdown("---")
 
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-            md_content = "# Blood Report Q&A\\n"
-            md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n"
+    md_content = "# Blood Report Q&A\n"
+    md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-            for msg in st.session_state.messages:
-                if msg["role"] == "user":
-                    md_content += f"**You:**\\n{msg['content']}\\n\\n"
-                else:
-                    md_content += f"**Assistant:**\\n{msg['content']}\\n\\n"
-                    md_content += "---\\n\\n"
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            md_content += f"**You:**\n{msg['content']}\n\n"
+        else:
+            md_content += f"**Assistant:**\n{msg['content']}\n\n"
+            md_content += "---\n\n"
 
-            # Download button
-            st.download_button(
-                label="📥 Download this Q&A conversation",
-                data=md_content,
-                file_name=f"blood_report_qa_{timestamp}.md",
-                mime="text/markdown",
-                help="Saves all questions and answers in nicely formatted markdown",
-                use_container_width=False
-            )
+    # Download button
+    st.download_button(
+        label="📥 Download this Q&A conversation",
+        data=md_content,
+        file_name=f"blood_report_qa_{timestamp}.md",
+        mime="text/markdown",
+        help="Saves all questions and answers in nicely formatted markdown",
+        use_container_width=False
+    )
 
-        # ── Recommendation interface ───────────────────────────────────────────
-        if st.session_state.rag_chain is not None:
-            st.divider()
-            st.subheader("General Recommendations (not medical advice)")
+# ── Recommendation interface ───────────────────────────────────────────
+if st.session_state.rag_chain is not None:
+    st.divider()
+    st.subheader("General Recommendations (not medical advice)")
 
-            if st.button("Get Recommendations for Abnormal Values", type="primary", use_container_width=True):
-                with st.spinner("Generating general suggestions..."):
-                    # Safety check: make sure API key exists
-                    if "groq_api_key" not in st.session_state or not st.session_state.groq_api_key:
-                        st.error("Groq API key is missing or invalid. Please set it again in the sidebar.")
-                        st.stop()
+    if st.button("Get Recommendations for Abnormal Values", type="primary", use_container_width=True):
+        with st.spinner("Generating general suggestions..."):
+            # Safety check: make sure API key exists
+            if "groq_api_key" not in st.session_state or not st.session_state.groq_api_key:
+                st.error("Groq API key is missing or invalid. Please set it again in the sidebar.")
+                st.stop()
 
-                    # Use the same retriever to get context (abnormal values)
-                    abnormal_context = st.session_state.rag_chain.invoke({"input": "any abnormal report"})["answer"].strip()
+            # Use the same retriever to get context (abnormal values)
+            abnormal_context = st.session_state.rag_chain.invoke({"input": "any abnormal report"})["answer"].strip()
 
-                    # New prompt for recommendations
-                    rec_prompt_template = """You are a general health information assistant.
+            # New prompt for recommendations
+            rec_prompt_template = """You are a general health information assistant.
 Based on the abnormal lab values below, provide ONLY very general suggestions for recovery.
 For each abnormal value:
 - Suggest common lifestyle, diet changes (e.g. exercise, low sugar diet)
@@ -366,24 +367,24 @@ Abnormal values from report:
 
 Answer in bullet points, be concise and cautious."""
 
-                    rec_prompt = ChatPromptTemplate.from_template(rec_prompt_template)
+            rec_prompt = ChatPromptTemplate.from_template(rec_prompt_template)
 
-                    # Use same LLM — with safety
-                    rec_llm = ChatGroq(
-                        model="llama-3.3-70b-versatile",
-                        temperature=0.2,
-                        max_tokens=800,
-                        api_key=st.session_state.groq_api_key
-                    )
+            # Use same LLM — with safety
+            rec_llm = ChatGroq(
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+                max_tokens=800,
+                api_key=st.session_state.groq_api_key
+            )
 
-                    # Simple chain for recommendations
-                    rec_chain = rec_prompt | rec_llm
+            # Simple chain for recommendations
+            rec_chain = rec_prompt | rec_llm
 
-                    try:
-                        rec_response = rec_chain.invoke({"abnormal_context": abnormal_context})
-                        rec_answer = rec_response.content.strip()
-                        st.markdown(rec_answer)
-                    except Exception as e:
-                        st.error(f"Error generating recommendations: {str(e)}")
+            try:
+                rec_response = rec_chain.invoke({"abnormal_context": abnormal_context})
+                rec_answer = rec_response.content.strip()
+                st.markdown(rec_answer)
+            except Exception as e:
+                st.error(f"Error generating recommendations: {str(e)}")
 
-            st.caption("These are general ideas only. Always see a doctor for real advice.")
+    st.caption("These are general ideas only. Always see a doctor for real advice.")
