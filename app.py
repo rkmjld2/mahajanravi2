@@ -23,12 +23,44 @@ from langchain_groq import ChatGroq
 st.set_page_config(page_title="🩸 Blood Report Analyzer", layout="wide")
 
 # ── 1. SECURE SECRETS CHECK
-required_sections = ["connections", "secrets"]
-for section in required_sections:
-    if section not in st.secrets:
-        st.error(f"🚨 Missing required section: {section}")
-        st.stop()
-#        
+#required_sections = ["connections", "secrets"]
+#for section in required_sections:
+    #if section not in st.secrets:
+        #st.error(f"🚨 Missing required section: {section}")
+        #st.stop()
+#    started 
+# ── 1. SECURE SECRETS CHECK (Fixed for Streamlit Cloud)
+required_keys = ["GROQ_API_KEY", "connections", "connections.databases.default.host"]  # Test nested path
+missing = []
+for key_path in required_keys:
+    try:
+        if "." in key_path:
+            # Nested: connections.databases.default.host → st.secrets["connections"]["databases"]["default"]["host"]
+            keys = key_path.split(".")
+            d = st.secrets
+            for k in keys[:-1]:
+                d = d[k]
+            if keys[-1] not in d:
+                missing.append(key_path)
+        else:
+            if key_path not in st.secrets:
+                missing.append(key_path)
+    except (KeyError, TypeError):
+        missing.append(key_path)
+
+if missing:
+    st.error(f"🚨 Missing secrets: {', '.join(missing)}")
+    st.info("👉 Go to Streamlit Cloud → Settings → Secrets → Paste the fixed TOML → Save → Reboot")
+    st.stop()
+
+st.success("✅ All secrets verified!")
+#end here
+
+
+
+
+
+
 if "GROQ_API_KEY" in st.secrets:
     st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
 else:
@@ -243,5 +275,6 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+
 
 
