@@ -310,7 +310,7 @@ with tab2:
     ```
     """)
 # code addted further here 
-# ── Download Q&A ────────────────────────────────────────────────
+        # ── Download Q&A ────────────────────────────────────────────────
         if st.session_state.messages:
             st.markdown("---")
 
@@ -343,34 +343,28 @@ with tab2:
 
             if st.button("Get Recommendations for Abnormal Values", type="primary", use_container_width=True):
                 with st.spinner("Generating general suggestions..."):
-                    # Safety check for API key
+                    # Safety check: make sure API key exists
                     if "groq_api_key" not in st.session_state or not st.session_state.groq_api_key:
                         st.error("Groq API key is missing or invalid. Please set it again in the sidebar.")
                         st.stop()
 
-                    # Get abnormal values from report
+                    # Use the same retriever to get context (abnormal values)
                     abnormal_context = st.session_state.rag_chain.invoke({"input": "any abnormal report"})["answer"].strip()
 
                     # New prompt for recommendations
-                    rec_prompt_template = """You are a general health information assistant — NOT a doctor. You NEVER prescribe, recommend or advise taking any medicine.
-
-Based ONLY on the abnormal lab values below:
-
+                    rec_prompt_template = """You are a general health information assistant.
+Based on the abnormal lab values below, provide ONLY very general suggestions for recovery.
 For each abnormal value:
-- Suggest common lifestyle and diet changes
-- Mention the most common medicine class doctors sometimes consider
-- If the condition is very well-known, you may give 1–2 extremely common generic medicine examples (only ferrous sulfate for iron, metformin for glucose, atorvastatin/rosuvastatin for cholesterol — nothing else)
-- ALWAYS start medicine mention with: "Doctors sometimes consider medicines from the class of..."
-- NEVER use words like "take", "prescribe", "you should", "recommended dose"
-- NEVER give dosage, duration, brand names, or any instruction to use medicine
-
-MANDATORY ENDING (must appear exactly):
-"This is NOT medical advice. NEVER take any medicine based on this information. Only a qualified doctor can diagnose you, decide if any treatment is needed, and prescribe the correct medicine if appropriate."
+- Suggest common lifestyle, diet changes (e.g. exercise, low sugar diet)
+- Mention general medicine classes if relevant (e.g. "doctors may consider statins for high cholesterol")
+- ALWAYS say: "This is not medical advice. Consult a qualified doctor for personalized treatment and medicines."
+- NEVER prescribe specific medicines or dosages.
+- NEVER diagnose diseases.
 
 Abnormal values from report:
 {abnormal_context}
 
-Answer in bullet points. Be extremely cautious and responsible."""
+Answer in bullet points, be concise and cautious."""
 
                     rec_prompt = ChatPromptTemplate.from_template(rec_prompt_template)
 
@@ -382,7 +376,7 @@ Answer in bullet points. Be extremely cautious and responsible."""
                         api_key=st.session_state.groq_api_key
                     )
 
-                    # Simple chain for recommendations (no retriever needed, just prompt)
+                    # Simple chain for recommendations
                     rec_chain = rec_prompt | rec_llm
 
                     try:
@@ -394,8 +388,5 @@ Answer in bullet points. Be extremely cautious and responsible."""
 
             st.caption("These are general ideas only. Always see a doctor for real advice.")
 
-
-
-
-
+        
 
