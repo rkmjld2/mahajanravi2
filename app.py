@@ -309,6 +309,90 @@ with tab2:
     INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
     ```
     """)
+# code addted further here 
+# ── Download Q&A ────────────────────────────────────────────────
+        if st.session_state.messages:
+            st.markdown("---")
+
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+            md_content = "# Blood Report Q&A\n"
+            md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    md_content += f"**You:**\n{msg['content']}\n\n"
+                else:
+                    md_content += f"**Assistant:**\n{msg['content']}\n\n"
+                    md_content += "---\n\n"
+
+            # Download button
+            st.download_button(
+                label="📥 Download this Q&A conversation",
+                data=md_content,
+                file_name=f"blood_report_qa_{timestamp}.md",
+                mime="text/markdown",
+                help="Saves all questions and answers in nicely formatted markdown",
+                use_container_width=False
+            )
+
+        # ── Recommendation interface ───────────────────────────────────────────
+        if st.session_state.rag_chain is not None:
+            st.divider()
+            st.subheader("General Recommendations (not medical advice)")
+
+            if st.button("Get Recommendations for Abnormal Values", type="primary", use_container_width=True):
+                with st.spinner("Generating general suggestions..."):
+                    # Safety check for API key
+                    if "groq_api_key" not in st.session_state or not st.session_state.groq_api_key:
+                        st.error("Groq API key is missing or invalid. Please set it again in the sidebar.")
+                        st.stop()
+
+                    # Get abnormal values from report
+                    abnormal_context = st.session_state.rag_chain.invoke({"input": "any abnormal report"})["answer"].strip()
+
+                    # New prompt for recommendations
+                    rec_prompt_template = """You are a general health information assistant — NOT a doctor. You NEVER prescribe, recommend or advise taking any medicine.
+
+Based ONLY on the abnormal lab values below:
+
+For each abnormal value:
+- Suggest common lifestyle and diet changes
+- Mention the most common medicine class doctors sometimes consider
+- If the condition is very well-known, you may give 1–2 extremely common generic medicine examples (only ferrous sulfate for iron, metformin for glucose, atorvastatin/rosuvastatin for cholesterol — nothing else)
+- ALWAYS start medicine mention with: "Doctors sometimes consider medicines from the class of..."
+- NEVER use words like "take", "prescribe", "you should", "recommended dose"
+- NEVER give dosage, duration, brand names, or any instruction to use medicine
+
+MANDATORY ENDING (must appear exactly):
+"This is NOT medical advice. NEVER take any medicine based on this information. Only a qualified doctor can diagnose you, decide if any treatment is needed, and prescribe the correct medicine if appropriate."
+
+Abnormal values from report:
+{abnormal_context}
+
+Answer in bullet points. Be extremely cautious and responsible."""
+
+                    rec_prompt = ChatPromptTemplate.from_template(rec_prompt_template)
+
+                    # Use same LLM — with safety
+                    rec_llm = ChatGroq(
+                        model="llama-3.3-70b-versatile",
+                        temperature=0.2,
+                        max_tokens=800,
+                        api_key=st.session_state.groq_api_key
+                    )
+
+                    # Simple chain for recommendations (no retriever needed, just prompt)
+                    rec_chain = rec_prompt | rec_llm
+
+                    try:
+                        rec_response = rec_chain.invoke({"abnormal_context": abnormal_context})
+                        rec_answer = rec_response.content.strip()
+                        st.markdown(rec_answer)
+                    except Exception as e:
+                        st.error(f"Error generating recommendations: {str(e)}")
+
+            st.caption("These are general ideas only. Always see a doctor for real advice.")
 
 
 
