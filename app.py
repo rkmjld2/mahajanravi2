@@ -316,15 +316,15 @@ with tab2:
 
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-            md_content = "# Blood Report Q&A\n"
-            md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            md_content = "# Blood Report Q&A\\n"
+            md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n"
 
             for msg in st.session_state.messages:
                 if msg["role"] == "user":
-                    md_content += f"**You:**\n{msg['content']}\n\n"
+                    md_content += f"**You:**\\n{msg['content']}\\n\\n"
                 else:
-                    md_content += f"**Assistant:**\n{msg['content']}\n\n"
-                    md_content += "---\n\n"
+                    md_content += f"**Assistant:**\\n{msg['content']}\\n\\n"
+                    md_content += "---\\n\\n"
 
             # Download button
             st.download_button(
@@ -387,6 +387,3 @@ Answer in bullet points, be concise and cautious."""
                         st.error(f"Error generating recommendations: {str(e)}")
 
             st.caption("These are general ideas only. Always see a doctor for real advice.")
-
-        
-
