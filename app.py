@@ -1,126 +1,102 @@
-# app.py - Blood Report Analyzer (FINAL VERSION - GitHub SAFE)
+# app.py - Blood Report Analyzer (FIXED for TiDB Cloud SSL on Streamlit)
+
 import streamlit as st
 import pandas as pd
 from io import StringIO
-import time
 from datetime import datetime
 import mysql.connector
-from pathlib import Path
+import os
+import tempfile
 
-# LangChain imports
+# LangChain / Groq imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_classic.chains import create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-
-#from langchain.chains import create_retrieval_chain
-#from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.documents import Document
 from langchain_groq import ChatGroq
 
 st.set_page_config(page_title="🩸 Blood Report Analyzer", layout="wide")
 
 # ── 1. SECURE SECRETS CHECK
-#required_sections = ["connections", "secrets"]
-#for section in required_sections:
-    #if section not in st.secrets:
-        #st.error(f"🚨 Missing required section: {section}")
-        #st.stop()
-#    started 
-# ── 1. SECURE SECRETS CHECK (Fixed for Streamlit Cloud)
-required_keys = ["GROQ_API_KEY", "connections", "connections.databases.default.host"]  # Test nested path
+required_keys = [
+    "GROQ_API_KEY",
+    "connections.databases.default.host",
+    "connections.databases.default.port",
+    "connections.databases.default.username",
+    "connections.databases.default.password",
+    "connections.databases.default.database",
+    "TIDB_SSL_CA"
+]
+
 missing = []
-for key_path in required_keys:
+for key in required_keys:
+    keys = key.split(".")
+    d = st.secrets
     try:
-        if "." in key_path:
-            # Nested: connections.databases.default.host → st.secrets["connections"]["databases"]["default"]["host"]
-            keys = key_path.split(".")
-            d = st.secrets
-            for k in keys[:-1]:
-                d = d[k]
-            if keys[-1] not in d:
-                missing.append(key_path)
-        else:
-            if key_path not in st.secrets:
-                missing.append(key_path)
-    except (KeyError, TypeError):
-        missing.append(key_path)
+        for k in keys[:-1]:
+            d = d[k]
+        if keys[-1] not in d:
+            missing.append(key)
+    except:
+        missing.append(key)
 
 if missing:
     st.error(f"🚨 Missing secrets: {', '.join(missing)}")
-    st.info("👉 Go to Streamlit Cloud → Settings → Secrets → Paste the fixed TOML → Save → Reboot")
+    st.info("Please check Streamlit Cloud → Settings → Secrets (TOML format)")
     st.stop()
 
-st.success("✅ All secrets verified!")
-#end here
+st.success("✅ Secrets verified")
 
+# Set Groq key
+st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
 
+# ── 2. Write CA certificate to temp file (required for mysql-connector)
+@st.cache_resource(show_spinner=False)
+def ensure_ca_file():
+    ca_content = st.secrets["TIDB_SSL_CA"].strip()
+    if "-----BEGIN CERTIFICATE-----" not in ca_content:
+        st.error("❌ TIDB_SSL_CA in secrets is invalid (missing certificate header)")
+        st.stop()
 
+    ca_path = "/tmp/tidb_ca.pem"
+    if not os.path.exists(ca_path):
+        with open(ca_path, "w") as f:
+            f.write(ca_content)
+        st.sidebar.info("🔐 TiDB CA certificate written to disk")
 
+    return ca_path
 
-
-if "GROQ_API_KEY" in st.secrets:
-    st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
-else:
-    st.error("🚨 Missing GROQ_API_KEY in Streamlit Cloud Secrets. Please add it in Settings → Secrets.")
-    st.stop()
-
-#st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
-# ── 2. SSL CERTIFICATE CONTENT
-def get_ssl_ca_content():
-    """Always read fresh from secrets - no caching issues"""
-    cert_content = st.secrets.get("TIDB_SSL_CA", "").strip()
-
-    if not cert_content:
-        st.error("❌ TIDB_SSL_CA is missing or empty. Please paste the CA certificate in secrets.toml")
-        return None
-
-    if "-----BEGIN CERTIFICATE-----" in cert_content:
-        return cert_content
-    else:
-        st.error("❌ TIDB_SSL_CA invalid - missing certificate header")
-        return None
-
-
-# ── 3. Database Connection
 # ── 3. Database Connection
 @st.cache_resource
 def get_db_connection():
-    db_config = st.secrets["connections"]["databases"]["default"]
-    ssl_ca_content = db_config["TIDB_SSL_CA"]
+    ensure_ca_file()  # Make sure file exists
 
-    if not ssl_ca_content:
-        st.error("❌ TiDB SSL CA certificate not found in secrets.toml")
-        st.stop()
+    db_config = st.secrets["connections"]["databases"]["default"]
+    ca_path = "/tmp/tidb_ca.pem"
 
     try:
-        import pymysql  # Much better SSL handling!
-        conn = pymysql.connect(
+        conn = mysql.connector.connect(
             host=db_config["host"],
             port=int(db_config["port"]),
             user=db_config["username"],
             password=db_config["password"],
             database=db_config["database"],
-            ssl={
-                'ca': ssl_ca_content  # ✅ PyMySQL handles strings directly!
-            },
-            connect_timeout=30,
-            autocommit=True
+            connect_timeout=20,
+            ssl_ca=ca_path,
+            ssl_verify_cert=True,
+            ssl_verify_identity=True
         )
-        
-        # Test connection
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        st.success("✅ Database connected successfully!")
         return conn
-        
-    except Exception as e:
-        st.error(f"❌ Database connection failed: {e}")
-        st.stop()
+    except mysql.connector.Error as e:
+        st.error(f"❌ TiDB connection failed: {e.msg} (errno {e.errno})")
+        if "SSL" in str(e).upper():
+            st.info("Common causes: wrong CA content, expired cert, or host mismatch")
+        raise
 
-# ── 3b. VERIFY CONNECTION (optional sidebar test)
+# Test connection button in sidebar
 def test_tidb_connection():
     try:
         conn = get_db_connection()
@@ -128,12 +104,11 @@ def test_tidb_connection():
         cursor.execute("SELECT 1;")
         result = cursor.fetchone()
         conn.close()
-        st.sidebar.success(f"✅ TiDB connection verified! Test query returned: {result[0]}")
+        st.sidebar.success(f"✅ TiDB connected! Test query OK: {result}")
     except Exception as e:
-        st.sidebar.error(f"❌ TiDB connection failed: {e}")
-        st.stop()
+        st.sidebar.error(f"❌ Connection test failed: {str(e)}")
 
-# ── 4. EMBEDDINGS
+# ── 4. Embeddings (cached)
 @st.cache_resource(show_spinner=False)
 def load_embeddings():
     return HuggingFaceEmbeddings(
@@ -143,28 +118,29 @@ def load_embeddings():
 
 embeddings = load_embeddings()
 
-# ── 5. SESSION STATE
-if "rag_chain" not in st.session_state: st.session_state.rag_chain = None
-if "messages" not in st.session_state: st.session_state.messages = []
-if "df" not in st.session_state: st.session_state.df = None
+# ── 5. Session state init
+if "rag_chain" not in st.session_state:
+    st.session_state.rag_chain = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "df" not in st.session_state:
+    st.session_state.df = None
 
-# ── 6. UI
+# ── UI ──────────────────────────────────────────────────────────────
 st.title("🩸 Blood Report Analyzer – Groq + TiDB Cloud")
-st.caption("✅ Production-ready | 🔒 Secure secrets | 💾 Saves to your TiDB database")
+st.caption("Fixed version | Secure secrets | Saves to TiDB")
 
 with st.sidebar:
-    st.markdown("### ✅ Status")
-    st.success("All systems ready")
-    st.info("Paste report → Edit → Process → Ask AI")
+    st.markdown("### Status")
+    st.success("Systems ready")
     if st.button("🔍 Test TiDB Connection"):
         test_tidb_connection()
 
-# (rest of your UI and logic unchanged)
 tab1, tab2 = st.tabs(["📊 Upload & Analyze", "ℹ️ Instructions"])
 
 with tab1:
     raw_text = st.text_area(
-        "1. Paste blood report (CSV format)",
+        "1. Paste your blood report (CSV-like format)",
         height=250,
         value="""Test,Result,Unit,Reference Range,Flag
 Hemoglobin,12.4,g/dL,13.0-17.0,L
@@ -173,21 +149,21 @@ Glucose Fasting,102,mg/dL,70-99,H
 Creatinine,1.1,mg/dL,0.6-1.2,
 ALT,45,U/L,7-56,
 Total Cholesterol,210,mg/dL,<200,H""",
-        help="Copy table from PDF/Excel/WhatsApp"
+        help="Copy from PDF / lab report / WhatsApp"
     )
 
     if st.button("🔍 2. Parse Table", type="primary", use_container_width=True):
         if raw_text.strip():
             try:
                 df = pd.read_csv(StringIO(raw_text), sep=None, engine="python")
-                df = df.dropna(how="all")
+                df = df.dropna(how="all").reset_index(drop=True)
                 st.session_state.df = df
-                st.success(f"✅ Parsed {len(df)} tests")
+                st.success(f"Parsed {len(df)} tests")
             except Exception as e:
-                st.error(f"❌ Parse error: {str(e)}")
+                st.error(f"Parse failed: {str(e)}")
 
     if st.session_state.df is not None:
-        st.subheader("3. ✏️ Edit Results")
+        st.subheader("3. Edit Results")
         edited_df = st.data_editor(
             st.session_state.df,
             num_rows="dynamic",
@@ -204,112 +180,111 @@ Total Cholesterol,210,mg/dL,<200,H""",
         )
 
         if st.button("🚀 4. Process & Save to TiDB", type="primary", use_container_width=True):
-            with st.spinner("Building AI + Saving to database..."):
-                # AI RAG Chain (your original logic)
+            with st.spinner("Processing + Saving..."):
+                # Build RAG
                 lines = ["Test | Result | Unit | Reference Range | Flag"]
                 for _, row in edited_df.iterrows():
                     row_str = " | ".join(str(val) for val in row if pd.notna(val))
                     lines.append(row_str)
-                
+
                 full_text = "\n".join(lines)
                 splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
                 chunks = splitter.split_text(full_text)
                 docs = [Document(page_content=ch) for ch in chunks]
-                
+
                 vectorstore = FAISS.from_documents(docs, embeddings)
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
                 prompt = ChatPromptTemplate.from_template("""
-You are a lab assistant. Answer using ONLY the report data below.
-Never diagnose diseases. Report values, flags, ranges only.
-
-Report: {context}
+You are a helpful lab report assistant.
+Use ONLY the provided report data.
+Never diagnose diseases. Only report values, flags, ranges.
+Context: {context}
 Question: {input}
-Answer (include units/flags):""")
+Answer (include units & flags when relevant):""")
 
                 llm = ChatGroq(
                     model="llama-3.3-70b-versatile",
                     temperature=0.1,
                     api_key=st.session_state.groq_api_key
                 )
+
                 qa_chain = create_stuff_documents_chain(llm, prompt)
                 st.session_state.rag_chain = create_retrieval_chain(retriever, qa_chain)
 
-            # Save to YOUR TiDB database (matches medical1_app.sql)
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                inserted_count = 0
-                for _, row in edited_df.iterrows():
-                    cursor.execute("""
-                        INSERT INTO blood_reports 
-                        (timestamp, test_name, result, unit, ref_range, flag) 
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (
-                        timestamp, 
-                        row.get("Test", ""), 
-                        float(row.get("Result", 0)),
-                        row.get("Unit", ""), 
-                        row.get("Reference Range", ""),
-                        row.get("Flag", "")
-                    ))
-                    inserted_count += 1
-                conn.commit()
-                conn.close()
-                st.success(f"✅ AI ready! 💾 Saved {inserted_count} tests to TiDB!")
-            except Exception as e:
-                st.error(f"❌ Database error: {str(e)}")
-def test_tidb_connection():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1;")
-        result = cursor.fetchone()
-        conn.close()
-        st.sidebar.success(f"✅ TiDB connection verified! Test query returned: {result[0]}")
-    except Exception as e:
-        st.sidebar.error(f"❌ TiDB connection failed: {e}")
+                # Save to TiDB
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    inserted = 0
 
-    # Chat interface
+                    for _, row in edited_df.iterrows():
+                        cursor.execute("""
+                            INSERT INTO blood_reports
+                            (timestamp, test_name, result, unit, ref_range, flag)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (
+                            timestamp,
+                            row.get("Test", ""),
+                            float(row.get("Result") or 0),
+                            row.get("Unit", ""),
+                            row.get("Reference Range", ""),
+                            row.get("Flag", "")
+                        ))
+                        inserted += 1
+
+                    conn.commit()
+                    conn.close()
+                    st.success(f"AI ready! Saved {inserted} tests to TiDB.")
+                except Exception as e:
+                    st.error(f"Database save failed: {str(e)}")
+
+    # ── Chat ────────────────────────────────────────────────────────
     if st.session_state.rag_chain:
         st.markdown("---")
-        st.subheader("5. 💬 Ask about your report")
-        
+        st.subheader("5. Ask about your report")
+
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        if query := st.chat_input("What do you want to know? (e.g. 'Is cholesterol high?')"):
+        if query := st.chat_input("Ask anything (e.g. 'Is my cholesterol high?')"):
             st.session_state.messages.append({"role": "user", "content": query})
             with st.chat_message("user"):
                 st.markdown(query)
 
             with st.chat_message("assistant"):
-                with st.spinner("AI analyzing..."):
+                with st.spinner("Thinking..."):
                     response = st.session_state.rag_chain.invoke({"input": query})
                     answer = response["answer"].strip()
                     st.markdown(answer)
-            
+
             st.session_state.messages.append({"role": "assistant", "content": answer})
-# (rest of your UI and logic unchanged)
+
 with tab2:
     st.markdown("""
-    ### How to use:
-    1. **Paste** blood test report (PDF/Excel/WhatsApp)
-    2. **Parse** → Edit values in table  
-    3. **Process** → AI analyzes + saves to TiDB
-    4. **Ask** questions about your results
-    5. **Download** Q&A session
-    
-    ### Your TiDB database receives:
-    ```sql
-    INSERT INTO blood_reports (timestamp, test_name, result, unit, ref_range, flag)
-    ```
+    ### How to use
+    1. Paste blood report text (CSV style)
+    2. Parse → edit values
+    3. Process → AI ready + saved to TiDB
+    4. Ask questions
+    5. Download conversation
+
+    Data is saved to table `blood_reports`
     """)
-# code addted further here 
-        # ── Download Q&A ────────────────────────────────────────────────
+
+# ── Download Q&A ────────────────────────────────────────────────────
+if st.session_state.messages:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    md_content = "# Blood Report Q&A\n"
+    md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            md_content += f"**You:**\n{msg['content']}\n\n"
+        else:
+            md_content += f"**
 # ── Download Q&A ────────────────────────────────────────────────
 if st.session_state.messages:
     st.markdown("---")
@@ -387,6 +362,7 @@ Answer in bullet points, be concise and cautious."""
                 st.error(f"Error generating recommendations: {str(e)}")
 
     st.caption("These are general ideas only. Always see a doctor for real advice.")
+
 
 
 
