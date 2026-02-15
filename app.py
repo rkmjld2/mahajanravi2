@@ -89,7 +89,7 @@ def get_ssl_ca_content():
 @st.cache_resource
 def get_db_connection():
     db_config = st.secrets["connections"]["databases"]["default"]
-    ssl_ca_content = db_config["TIDB_SSL_CA"]  # Direct from secrets - no get_ssl_ca_content() needed
+    ssl_ca_content = db_config["TIDB_SSL_CA"]
 
     if not ssl_ca_content:
         st.error("❌ TiDB SSL CA certificate not found in secrets.toml")
@@ -102,12 +102,15 @@ def get_db_connection():
             user=db_config["username"],
             password=db_config["password"],
             database=db_config["database"],
-            ssl_ca=ssl_ca_content.encode('utf-8'),  # ✅ Convert PEM string to bytes
+            ssl={
+                'ca': ssl_ca_content  # ✅ Dictionary bypasses temp file creation!
+            },
             ssl_verify_cert=True,
             ssl_verify_identity=True,
             connect_timeout=30,
-            autocommit=True  # ✅ Good for Streamlit apps
+            autocommit=True
         )
+        
         # Test connection
         conn.is_connected()
         st.success("✅ Database connected successfully!")
@@ -115,7 +118,8 @@ def get_db_connection():
         
     except mysql.connector.Error as e:
         st.error(f"❌ Database connection failed: {e}")
-        st.stop()  # Better than raise for Streamlit
+        st.stop()
+
 
 # ── 3b. VERIFY CONNECTION (optional sidebar test)
 def test_tidb_connection():
@@ -384,5 +388,6 @@ Answer in bullet points, be concise and cautious."""
                 st.error(f"Error generating recommendations: {str(e)}")
 
     st.caption("These are general ideas only. Always see a doctor for real advice.")
+
 
 
