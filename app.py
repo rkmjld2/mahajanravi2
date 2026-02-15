@@ -102,9 +102,7 @@ def get_db_connection():
             user=db_config["username"],
             password=db_config["password"],
             database=db_config["database"],
-            ssl={
-                'ca': ssl_ca_content  # ✅ Dictionary bypasses temp file creation!
-            },
+            ssl_ca=ssl_ca_content,  # ✅ Direct PEM string (no .encode()!)
             ssl_verify_cert=True,
             ssl_verify_identity=True,
             connect_timeout=30,
@@ -112,10 +110,18 @@ def get_db_connection():
         )
         
         # Test connection
-        conn.is_connected()
-        st.success("✅ Database connected successfully!")
-        return conn
-        
+        if conn.is_connected():
+            st.success("✅ Database connected successfully!")
+            return conn
+        else:
+            st.error("❌ Connection established but not active")
+            conn.close()
+            st.stop()
+            
+    except mysql.connector.Error as e:
+        st.error(f"❌ Database connection failed: {e}")
+        st.stop()
+    
     except mysql.connector.Error as e:
         st.error(f"❌ Database connection failed: {e}")
         st.stop()
@@ -388,6 +394,7 @@ Answer in bullet points, be concise and cautious."""
                 st.error(f"Error generating recommendations: {str(e)}")
 
     st.caption("These are general ideas only. Always see a doctor for real advice.")
+
 
 
 
