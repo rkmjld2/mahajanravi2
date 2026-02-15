@@ -68,55 +68,31 @@ else:
     st.stop()
 
 #st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
-
-# ── 2. SSL CERTIFICATE CONTENT (Force fresh read)
+# ── 2. SSL CERTIFICATE CONTENT
 def get_ssl_ca_content():
     """Always read fresh from secrets - no caching issues"""
-    # Direct access - handles both flat and nested secrets
-    cert_content = None
-    try:
-        cert_content = st.secrets["TIDB_SSL_CA"]
-    except KeyError:
-        try:
-            cert_content = st.secrets.get("TIDB_SSL_CA", "")
-        except:
-            pass
-    
-    if not cert_content or cert_content.strip() == "":
-        st.warning("⚠️ No TIDB_SSL_CA found - trying SSL without CA verification")
+    cert_content = st.secrets.get("TIDB_SSL_CA", "").strip()
+
+    if not cert_content:
+        st.error("❌ TIDB_SSL_CA is missing or empty. Please paste the CA certificate in secrets.toml")
         return None
-    
-    result = cert_content.strip()
-    if "-----BEGIN CERTIFICATE-----" in result:
-        return result
+
+    if "-----BEGIN CERTIFICATE-----" in cert_content:
+        return cert_content
     else:
         st.error("❌ TIDB_SSL_CA invalid - missing certificate header")
         return None
-# -- 3  Database Connection
+
+
+# ── 3. Database Connection
 @st.cache_resource
 def get_db_connection():
     db_config = st.secrets["connections"]["databases"]["default"]
-    ssl_ca_content = get_ssl_ca_content()  # Fresh read every time
-    
-    # Debug: Show what we found
-    if ssl_ca_content:
-        st.sidebar.success(f"✅ SSL CA loaded: {len(ssl_ca_content)} chars")
-    else:
-        st.sidebar.warning("⚠️ No SSL CA - will try without verification")
-    
-    ssl_args = {}
-    if ssl_ca_content:
-        ssl_args = {
-            "ssl_ca": ssl_ca_content,
-            "ssl_verify_cert": True,
-            "ssl_verify_identity": True
-        }
-    else:
-        ssl_args = {
-            "ssl_disabled": False,  # Still use SSL, just skip CA check
-            "use_unicode": True
-        }
-    
+    ssl_ca_content = get_ssl_ca_content()
+
+    if not ssl_ca_content:
+        st.stop()
+
     try:
         conn = mysql.connector.connect(
             host=db_config["host"],
@@ -124,13 +100,16 @@ def get_db_connection():
             user=db_config["username"],
             password=db_config["password"],
             database=db_config["database"],
-            connect_timeout=30,
-            **ssl_args
+            ssl_ca=StringIO(ssl_ca_content),  # pass CA string
+            ssl_verify_cert=True,
+            ssl_verify_identity=True,
+            connect_timeout=30
         )
         return conn
-    except Exception as e:
-        st.error(f"❌ Connection failed: {str(e)}")
+    except mysql.connector.Error as e:
+        st.error(f"❌ Database connection failed: {e}")
         raise
+
 # ── 3b. VERIFY CONNECTION (optional sidebar test)
 def test_tidb_connection():
     try:
@@ -272,6 +251,16 @@ Answer (include units/flags):""")
                 st.success(f"✅ AI ready! 💾 Saved {inserted_count} tests to TiDB!")
             except Exception as e:
                 st.error(f"❌ Database error: {str(e)}")
+def test_tidb_connection():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        result = cursor.fetchone()
+        conn.close()
+        st.sidebar.success(f"✅ TiDB connection verified! Test query returned: {result[0]}")
+    except Exception as e:
+        st.sidebar.error(f"❌ TiDB connection failed: {e}")
 
     # Chat interface
     if st.session_state.rag_chain:
@@ -388,3 +377,4 @@ Answer in bullet points, be concise and cautious."""
                 st.error(f"Error generating recommendations: {str(e)}")
 
     st.caption("These are general ideas only. Always see a doctor for real advice.")
+
