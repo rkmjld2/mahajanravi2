@@ -96,36 +96,29 @@ def get_db_connection():
         st.stop()
 
     try:
-        conn = mysql.connector.connect(
+        import pymysql  # Much better SSL handling!
+        conn = pymysql.connect(
             host=db_config["host"],
             port=int(db_config["port"]),
             user=db_config["username"],
             password=db_config["password"],
             database=db_config["database"],
-            ssl_ca=ssl_ca_content,  # ✅ Direct PEM string (no .encode()!)
-            ssl_verify_cert=True,
-            ssl_verify_identity=True,
+            ssl={
+                'ca': ssl_ca_content  # ✅ PyMySQL handles strings directly!
+            },
             connect_timeout=30,
             autocommit=True
         )
         
         # Test connection
-        if conn.is_connected():
-            st.success("✅ Database connected successfully!")
-            return conn
-        else:
-            st.error("❌ Connection established but not active")
-            conn.close()
-            st.stop()
-            
-    except mysql.connector.Error as e:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        st.success("✅ Database connected successfully!")
+        return conn
+        
+    except Exception as e:
         st.error(f"❌ Database connection failed: {e}")
         st.stop()
-    
-    except mysql.connector.Error as e:
-        st.error(f"❌ Database connection failed: {e}")
-        st.stop()
-
 
 # ── 3b. VERIFY CONNECTION (optional sidebar test)
 def test_tidb_connection():
@@ -394,6 +387,7 @@ Answer in bullet points, be concise and cautious."""
                 st.error(f"Error generating recommendations: {str(e)}")
 
     st.caption("These are general ideas only. Always see a doctor for real advice.")
+
 
 
 
